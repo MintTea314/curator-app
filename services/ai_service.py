@@ -1,27 +1,26 @@
 import os
 import json
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=api_key)
 
-# 모델 설정 (아까 확인한 2.5 버전 사용)
-MODEL_NAME = 'models/gemini-2.5-pro'
-
+# [중요] 최신 라이브러리(google-genai) 사용 방식
 def summarize_text(text):
-    """
-    텍스트를 분석하여 '요약문'과 '검색 키워드 리스트'를 JSON으로 반환
-    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    
+    if not api_key:
+        return {"summary": "API 키가 없습니다.", "places": []}
+
     try:
-        model = genai.GenerativeModel(MODEL_NAME)
+        # 1. 클라이언트 연결 (신형 방식)
+        client = genai.Client(api_key=api_key)
         
-        # 프롬프트: JSON 포맷을 강제함
+        # 2. 프롬프트 작성
         prompt = f"""
         너는 여행 정보를 정리하는 AI야. 아래 텍스트를 분석해서 반드시 **JSON 형식**으로만 답변해줘.
-        다른 미사여구는 절대 넣지 마.
-
+        
         [분석할 텍스트]
         {text}
 
@@ -36,20 +35,25 @@ def summarize_text(text):
             ]
         }}
         """
+
+        # 3. AI에게 요청 (모델은 1.5-flash가 가성비/속도 최고입니다)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json' # JSON 강제 출력 기능
+            )
+        )
         
-        response = model.generate_content(prompt)
-        
-        # 응답 텍스트에서 JSON 부분만 발라내기 (가끔 ```json ... ``` 이렇게 줄 때가 있음)
-        cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
-        
-        # 파이썬 딕셔너리로 변환
-        result_json = json.loads(cleaned_text)
-        return result_json
-        
+        # 4. 결과 처리
+        if response.text:
+            return json.loads(response.text)
+        else:
+            return {"summary": "AI 응답이 비어있습니다.", "places": []}
+            
     except Exception as e:
-        # 에러 발생 시 비상용 깡통 데이터 리턴
         print(f"AI 에러: {e}")
         return {
-            "summary": "AI 분석 중 오류가 발생했습니다.",
+            "summary": f"분석 중 오류가 발생했습니다: {str(e)}",
             "places": []
         }
