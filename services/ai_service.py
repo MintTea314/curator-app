@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def summarize_text(text):
-    # 1. API 키 가져오기 (클라우드 우선, 없으면 로컬)
+    # 1. API 키 가져오기
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
     except:
@@ -39,9 +39,9 @@ def summarize_text(text):
         }}
         """
 
-        # [수정] 모델을 최신 2.0 버전으로 변경 (에러 해결의 핵심)
+        # [수정] 선생님이 요청하신 '2.5-pro' 모델로 확정
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model='gemini-2.5-pro',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type='application/json'
@@ -54,9 +54,8 @@ def summarize_text(text):
             return {"summary": "AI 응답이 비어있습니다.", "places": []}
             
     except Exception as e:
-        # 에러 메시지를 좀 더 자세히 출력해서 디버깅을 돕습니다.
         print(f"AI 에러 상세: {e}")
         return {
-            "summary": f"AI 분석 실패. (모델: gemini-2.0-flash-exp)\n에러 메시지: {str(e)}",
+            "summary": f"AI 분석 실패. (모델: gemini-2.5-pro)\n에러 메시지: {str(e)}",
             "places": []
         }
