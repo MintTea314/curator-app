@@ -1,23 +1,25 @@
 import os
 import json
+import streamlit as st # [추가] 스트림릿 기능 가져오기
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# [중요] 최신 라이브러리(google-genai) 사용 방식
 def summarize_text(text):
-    api_key = os.getenv("GEMINI_API_KEY")
+    # [수정] 클라우드(secrets) 먼저 확인하고, 없으면 내 컴퓨터(env) 확인
+    try:
+        api_key = st.secrets["GEMINI_API_KEY"]
+    except:
+        api_key = os.getenv("GEMINI_API_KEY")
     
     if not api_key:
-        return {"summary": "API 키가 없습니다.", "places": []}
+        return {"summary": "API 키가 없습니다. Streamlit Secrets 설정을 확인해주세요.", "places": []}
 
     try:
-        # 1. 클라이언트 연결 (신형 방식)
         client = genai.Client(api_key=api_key)
         
-        # 2. 프롬프트 작성
         prompt = f"""
         너는 여행 정보를 정리하는 AI야. 아래 텍스트를 분석해서 반드시 **JSON 형식**으로만 답변해줘.
         
@@ -36,16 +38,14 @@ def summarize_text(text):
         }}
         """
 
-        # 3. AI에게 요청 (모델은 1.5-flash가 가성비/속도 최고입니다)
         response = client.models.generate_content(
             model='gemini-1.5-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
-                response_mime_type='application/json' # JSON 강제 출력 기능
+                response_mime_type='application/json'
             )
         )
         
-        # 4. 결과 처리
         if response.text:
             return json.loads(response.text)
         else:
