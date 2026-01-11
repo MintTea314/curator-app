@@ -5,7 +5,7 @@ import datetime
 import services.scraper_service as scraper
 import services.ai_service as ai
 import services.map_service as map_api
-import services.notion_service as notion # [추가] 노션 서비스
+import services.notion_service as notion
 
 st.set_page_config(page_title="AI 큐레이터", page_icon="✈️", layout="centered")
 
@@ -81,7 +81,6 @@ if st.session_state.analysis_result:
         place_link = map_api.get_map_link(p_map['place_id']) if p_map else ""
         photo = p_map.get('photo_url') if p_map else None
 
-        # [수정] 노션에 보낼 데이터 구조 (사진URL 포함)
         save_data.append({
             "식당이름": name,
             "평점": rating,
@@ -111,26 +110,31 @@ if st.session_state.analysis_result:
                     st.button("정보 없음", disabled=True, key=name)
             st.markdown("---")
 
-    # --- [저장 섹션] ---
+    # --- [수정된 저장 섹션] ---
     st.subheader("💾 리스트 저장")
     
     if save_data:
         col_csv, col_notion = st.columns(2)
         
         with col_csv:
-            if st.button("내 컴퓨터(Excel)에 저장", use_container_width=True):
-                df = pd.DataFrame(save_data)
-                # 엑셀엔 사진 URL 제외하고 깔끔하게 저장
-                df_clean = df.drop(columns=['사진URL'], errors='ignore')
-                
-                file_name = "my_food_list.csv"
-                if not os.path.exists(file_name):
-                    df_clean.to_csv(file_name, index=False, encoding="utf-8-sig")
-                else:
-                    df_clean.to_csv(file_name, index=False, mode='a', header=False, encoding="utf-8-sig")
-                st.success("✅ 엑셀 저장 완료!")
+            # 1. 엑셀 다운로드 (웹 버전용)
+            df = pd.DataFrame(save_data)
+            df_clean = df.drop(columns=['사진URL'], errors='ignore')
+            
+            # 데이터프레임을 CSV 문자열로 변환
+            csv_data = df_clean.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            
+            # '다운로드 버튼' 기능 사용
+            st.download_button(
+                label="내 컴퓨터로 엑셀 다운로드 💾",
+                data=csv_data,
+                file_name=f"맛집리스트_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
 
         with col_notion:
+            # 2. 노션 저장 (클라우드 데이터베이스)
             if st.button("노션(Notion)에 저장 🚀", type="primary", use_container_width=True):
                 with st.spinner("노션으로 데이터를 보내는 중..."):
                     success, msg = notion.save_to_notion(save_data)
