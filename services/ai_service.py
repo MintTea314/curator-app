@@ -1,6 +1,6 @@
 import os
 import json
-import streamlit as st # [추가] 스트림릿 기능 가져오기
+import streamlit as st
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -8,16 +8,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def summarize_text(text):
-    # [수정] 클라우드(secrets) 먼저 확인하고, 없으면 내 컴퓨터(env) 확인
+    # 1. API 키 가져오기 (클라우드 우선, 없으면 로컬)
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
     except:
         api_key = os.getenv("GEMINI_API_KEY")
     
     if not api_key:
-        return {"summary": "API 키가 없습니다. Streamlit Secrets 설정을 확인해주세요.", "places": []}
+        return {"summary": "API 키 오류: Streamlit Secrets 설정을 확인해주세요.", "places": []}
 
     try:
+        # 2. 클라이언트 연결
         client = genai.Client(api_key=api_key)
         
         prompt = f"""
@@ -38,8 +39,9 @@ def summarize_text(text):
         }}
         """
 
+        # [수정] 모델을 최신 2.0 버전으로 변경 (에러 해결의 핵심)
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.0-flash-exp',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type='application/json'
@@ -52,8 +54,9 @@ def summarize_text(text):
             return {"summary": "AI 응답이 비어있습니다.", "places": []}
             
     except Exception as e:
-        print(f"AI 에러: {e}")
+        # 에러 메시지를 좀 더 자세히 출력해서 디버깅을 돕습니다.
+        print(f"AI 에러 상세: {e}")
         return {
-            "summary": f"분석 중 오류가 발생했습니다: {str(e)}",
+            "summary": f"AI 분석 실패. (모델: gemini-2.0-flash-exp)\n에러 메시지: {str(e)}",
             "places": []
         }
