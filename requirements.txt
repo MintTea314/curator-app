@@ -1,0 +1,8 @@
+streamlit
+google-genai
+python-dotenv
+pandas
+yt-dlp
+youtube-transcript-api
+apify-client
+requests
