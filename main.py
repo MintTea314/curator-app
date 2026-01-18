@@ -1,33 +1,77 @@
-# [main.py 중간 부분]
+import streamlit as st
+import pandas as pd
+import os
+import datetime
+import services.scraper_service as scraper
+import services.ai_service as ai
+import services.map_service as map_api
+import services.notion_service as notion
+import services.image_service as image_gen
+
+st.set_page_config(page_title="AI 큐레이터", page_icon="✈️", layout="centered")
+
+st.markdown("""
+<style>
+    .main-header {text-align: center; margin-bottom: 1rem;}
+    .stTextInput input {text-align: center;}
+    .place-title {font-size: 1.2rem; font-weight: bold; color: #1f77b4;}
+    .stImageCaption {font-size: 0.8rem; color: #666; text-align: center;}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("<h1 class='main-header'>✈️ 여행/맛집 AI 큐레이터</h1>", unsafe_allow_html=True)
+st.write("유튜브/인스타 링크를 넣고 **엔터(Enter)**를 누르세요! 영상 속 정보와 지도, 카드 뉴스까지 만들어드립니다.")
+
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = None
+
+with st.form(key='analysis_form'):
+    url = st.text_input(label="링크 입력", placeholder="https://youtube.com/shorts/...", label_visibility="collapsed")
+    submit_button = st.form_submit_button(label="분석 시작 🚀", type="primary", use_container_width=True)
 
 if submit_button and url:
     with st.status("🕵️ 맛집을 찾고 있습니다...", expanded=True) as status:
         
-        # 1. 비디오 다운로드 시도
+        # 1. 비디오 다운로드 시도 (멀티모달 분석을 위해)
         st.write("📥 AI가 영상을 다운로드하고 있습니다... (약 10~20초 소요)")
         video_path, error = scraper.download_video(url)
         
+        ai_result = None
+        
         if video_path:
-            # 2. 영상을 AI에게 보여주기
+            # 2. 영상을 AI에게 보여주기 (비디오 분석)
             st.write("👀 AI가 영상을 시청하고 화면 속 글자를 읽는 중...")
             ai_result = ai.analyze_video(video_path)
             
             # 다 쓴 파일 삭제 (서버 용량 확보)
             if os.path.exists(video_path):
                 os.remove(video_path)
-                
         else:
-            # 다운로드 실패 시 기존 방식(텍스트 수집)으로 폴백(Fallback)
-            st.warning("영상 다운로드 실패. 텍스트 데이터만 수집합니다.")
-            content, error = scraper.get_youtube_data(url)
+            # 3. 다운로드 실패 시 기존 방식(텍스트 자막/댓글 수집)으로 폴백
+            st.warning("영상 다운로드 실패 또는 지원하지 않는 형식입니다. 텍스트 분석으로 전환합니다.")
+            
+            if "youtu" in url:
+                content, error = scraper.get_youtube_data(url)
+            else:
+                content, error = scraper.get_instagram_data(url)
+            
             if error:
+                status.update(label="❌ 수집 실패", state="error")
                 st.error(error)
                 st.stop()
-            ai_result = ai.summarize_text(content)
+            else:
+                st.write("🧠 텍스트 데이터를 분석 중...")
+                # ai_service.py에 summarize_text 함수가 남아있어야 작동합니다.
+                # (만약 덮어쓰기로 지워졌다면 비디오 분석만 가능합니다)
+                try:
+                    ai_result = ai.summarize_text(content)
+                except AttributeError:
+                    st.error("텍스트 분석 기능을 찾을 수 없습니다. (비디오 분석만 가능)")
+                    st.stop()
 
-        # 3. 지도 정보 찾기 (공통 로직)
+        # 4. 지도 정보 찾기 (공통 로직)
         places_data = []
-        if ai_result.get("places"):
+        if ai_result and ai_result.get("places"):
             st.write("📸 구글 지도에서 위치와 사진을 찾는 중...")
             for place in ai_result["places"]:
                 map_info = map_api.search_place(place["search_query"])
@@ -37,8 +81,108 @@ if submit_button and url:
                 })
         
         st.session_state.analysis_result = {
-            "summary": ai_result.get("summary"),
+            "summary": ai_result.get("summary") if ai_result else "분석 실패",
             "places_data": places_data,
             "url": url
         }
         status.update(label="✅ 분석 완료!", state="complete")
+
+if st.session_state.analysis_result:
+    result = st.session_state.analysis_result
+    places_data = result["places_data"]
+    
+    st.divider()
+    st.subheader("📝 3줄 요약")
+    st.info(result["summary"])
+    
+    st.subheader("📍 발견된 장소 리스트")
+    if not places_data:
+        st.warning("발견된 장소가 없습니다.")
+    
+    save_data = []
+    
+    for item in places_data:
+        p_ai = item['ai_info']
+        p_map = item['map_info']
+        
+        name = p_map['name'] if p_map else p_ai['search_query']
+        address = p_map['address'] if p_map else "주소 미상"
+        rating = p_map['rating'] if p_map else 0.0
+        place_link = map_api.get_map_link(p_map['place_id']) if p_map else ""
+        photo = p_map.get('photo_url') if p_map else None
+
+        current_place_data = {
+            "식당이름": name,
+            "평점": rating,
+            "특징": p_ai['description'],
+            "주소": address,
+            "지도링크": place_link,
+            "원본영상": result["url"],
+            "사진URL": photo 
+        }
+        save_data.append(current_place_data)
+
+        # --- UI 표시 ---
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"<div class='place-title'>{name}</div>", unsafe_allow_html=True)
+                st.caption(f"💡 {p_ai['description']}")
+                if p_map:
+                    st.markdown(f"⭐ **{p_map['rating']}** ({p_map['user_ratings_total']:,})")
+            with col2:
+                if p_map:
+                    st.link_button("지도 보기 🗺️", place_link)
+                else:
+                    st.button("정보 없음", disabled=True, key=name)
+            
+        # --- 이미지 카드 생성 및 출력 ---
+        if place_link:
+            with st.spinner(f"'{name}' 카드 이미지 생성 중..."):
+                card_image = image_gen.create_restaurant_card(current_place_data)
+                st.image(card_image, caption="☝️ 꾹 눌러서 이미지 저장/공유하세요! (QR코드 포함)", use_container_width=True)
+        
+        st.markdown("---")
+
+    # --- 공유 및 저장 섹션 ---
+    st.divider()
+    st.subheader("📤 결과 공유 및 저장")
+    
+    tab1, tab2, tab3 = st.tabs(["💬 텍스트 복사", "📊 엑셀(표) 복사/다운", "🔒 관리자"])
+    
+    with tab1:
+        share_text = f"[✈️ AI가 요약한 맛집 리스트]\n원본영상: {result['url']}\n\n"
+        for item in save_data:
+            share_text += f"📍 {item['식당이름']}"
+            if item['평점'] > 0: share_text += f" (⭐{item['평점']})"
+            share_text += f"\n💡 {item['특징']}\n"
+            if item['지도링크']: share_text += f"🔗 지도: {item['지도링크']}\n"
+            share_text += "------------------\n"
+        st.code(share_text, language="text")
+
+    with tab2:
+        st.write("마우스로 드래그해서 복사(Ctrl+C) 후 엑셀에 붙여넣기(Ctrl+V) 할 수 있습니다.")
+        
+        df = pd.DataFrame(save_data)
+        df_clean = df.drop(columns=['사진URL'], errors='ignore')
+        
+        st.dataframe(df_clean, hide_index=True, use_container_width=True)
+        st.write("") 
+        
+        csv_data = df_clean.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+        st.download_button(
+            label="엑셀 파일로 다운로드 (.csv) 📥",
+            data=csv_data,
+            file_name=f"맛집리스트_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    with tab3:
+        admin_password = st.text_input("관리자 키를 입력하세요", type="password")
+        if admin_password == "1234": 
+            if st.button("내 노션에 저장하기 🚀", type="primary", use_container_width=True):
+                with st.spinner("노션으로 전송 중..."):
+                    success, msg = notion.save_to_notion(save_data)
+                    if success: st.success(msg)
+                    else: st.error(msg)
