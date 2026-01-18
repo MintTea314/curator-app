@@ -6,3 +6,5 @@ yt-dlp
 youtube-transcript-api
 apify-client
 requests
+Pillow
+qrcode
