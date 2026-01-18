@@ -20,7 +20,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("<h1 class='main-header'>✈️ 여행/맛집 AI 큐레이터</h1>", unsafe_allow_html=True)
-st.write("유튜브/인스타 링크를 넣고 **엔터(Enter)**를 누르세요! 영상 속 정보와 지도, 카드 뉴스까지 만들어드립니다.")
+st.write("유튜브/인스타 링크를 넣고 **엔터(Enter)**를 누르세요! 오타가 있는 자막도 AI가 찰떡같이 알아듣고 찾아줍니다.")
 
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
@@ -32,46 +32,25 @@ with st.form(key='analysis_form'):
 if submit_button and url:
     with st.status("🕵️ 맛집을 찾고 있습니다...", expanded=True) as status:
         
-        # 1. 비디오 다운로드 시도 (멀티모달 분석을 위해)
-        st.write("📥 AI가 영상을 다운로드하고 있습니다... (약 10~20초 소요)")
-        video_path, error = scraper.download_video(url)
-        
-        ai_result = None
-        
-        if video_path:
-            # 2. 영상을 AI에게 보여주기 (비디오 분석)
-            st.write("👀 AI가 영상을 시청하고 화면 속 글자를 읽는 중...")
-            ai_result = ai.analyze_video(video_path)
-            
-            # 다 쓴 파일 삭제 (서버 용량 확보)
-            if os.path.exists(video_path):
-                os.remove(video_path)
+        # 1. 텍스트 데이터 수집
+        st.write("📥 영상의 자막/설명글을 읽어오는 중...")
+        if "youtu" in url:
+            content, error = scraper.get_youtube_data(url)
         else:
-            # 3. 다운로드 실패 시 기존 방식(텍스트 자막/댓글 수집)으로 폴백
-            st.warning("영상 다운로드 실패 또는 지원하지 않는 형식입니다. 텍스트 분석으로 전환합니다.")
-            
-            if "youtu" in url:
-                content, error = scraper.get_youtube_data(url)
-            else:
-                content, error = scraper.get_instagram_data(url)
-            
-            if error:
-                status.update(label="❌ 수집 실패", state="error")
-                st.error(error)
-                st.stop()
-            else:
-                st.write("🧠 텍스트 데이터를 분석 중...")
-                # ai_service.py에 summarize_text 함수가 남아있어야 작동합니다.
-                # (만약 덮어쓰기로 지워졌다면 비디오 분석만 가능합니다)
-                try:
-                    ai_result = ai.summarize_text(content)
-                except AttributeError:
-                    st.error("텍스트 분석 기능을 찾을 수 없습니다. (비디오 분석만 가능)")
-                    st.stop()
-
-        # 4. 지도 정보 찾기 (공통 로직)
+            content, error = scraper.get_instagram_data(url)
+        
+        if error:
+            status.update(label="❌ 수집 실패", state="error")
+            st.error(error)
+            st.stop()
+        
+        # 2. AI 분석 (추리 모드)
+        st.write("🧠 AI가 엉망인 자막 속에서 진짜 맛집 이름을 추리하는 중...")
+        ai_result = ai.summarize_text(content)
+        
+        # 3. 지도 정보 찾기
         places_data = []
-        if ai_result and ai_result.get("places"):
+        if ai_result.get("places"):
             st.write("📸 구글 지도에서 위치와 사진을 찾는 중...")
             for place in ai_result["places"]:
                 map_info = map_api.search_place(place["search_query"])
@@ -81,7 +60,7 @@ if submit_button and url:
                 })
         
         st.session_state.analysis_result = {
-            "summary": ai_result.get("summary") if ai_result else "분석 실패",
+            "summary": ai_result.get("summary"),
             "places_data": places_data,
             "url": url
         }
@@ -122,7 +101,7 @@ if st.session_state.analysis_result:
         }
         save_data.append(current_place_data)
 
-        # --- UI 표시 ---
+        # UI 출력
         with st.container():
             col1, col2 = st.columns([3, 1])
             with col1:
@@ -136,7 +115,7 @@ if st.session_state.analysis_result:
                 else:
                     st.button("정보 없음", disabled=True, key=name)
             
-        # --- 이미지 카드 생성 및 출력 ---
+        # 카드 이미지
         if place_link:
             with st.spinner(f"'{name}' 카드 이미지 생성 중..."):
                 card_image = image_gen.create_restaurant_card(current_place_data)
@@ -144,7 +123,7 @@ if st.session_state.analysis_result:
         
         st.markdown("---")
 
-    # --- 공유 및 저장 섹션 ---
+    # 공유 및 저장
     st.divider()
     st.subheader("📤 결과 공유 및 저장")
     
@@ -162,21 +141,12 @@ if st.session_state.analysis_result:
 
     with tab2:
         st.write("마우스로 드래그해서 복사(Ctrl+C) 후 엑셀에 붙여넣기(Ctrl+V) 할 수 있습니다.")
-        
         df = pd.DataFrame(save_data)
         df_clean = df.drop(columns=['사진URL'], errors='ignore')
-        
         st.dataframe(df_clean, hide_index=True, use_container_width=True)
         st.write("") 
-        
         csv_data = df_clean.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-        st.download_button(
-            label="엑셀 파일로 다운로드 (.csv) 📥",
-            data=csv_data,
-            file_name=f"맛집리스트_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        st.download_button("엑셀 파일로 다운로드 (.csv) 📥", csv_data, f"맛집리스트.csv", "text/csv", use_container_width=True)
 
     with tab3:
         admin_password = st.text_input("관리자 키를 입력하세요", type="password")
