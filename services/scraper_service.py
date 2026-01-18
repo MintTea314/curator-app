@@ -1,7 +1,10 @@
 import os
 import uuid
 import yt_dlp
-from youtube_transcript_api import YouTubeTranscriptApi
+# [수정 1] 라이브러리 충돌 방지를 위해 import 방식 변경
+import youtube_transcript_api
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+
 from apify_client import ApifyClient
 from dotenv import load_dotenv
 
@@ -9,7 +12,7 @@ load_dotenv()
 
 def get_youtube_data(url):
     """
-    (기존 기능) 유튜브 영상의 자막(Transcript)을 텍스트로 가져옵니다.
+    유튜브 영상의 자막(Transcript)을 텍스트로 가져옵니다.
     """
     try:
         video_id = ""
@@ -20,16 +23,28 @@ def get_youtube_data(url):
         elif "shorts" in url:
             video_id = url.split("shorts/")[1].split("?")[0]
         
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ko'])
+        if not video_id:
+            return None, "영상 ID를 찾을 수 없습니다."
+
+        # [수정 2] 한국어(ko) 우선, 없으면 영어(en), 그것도 없으면 자동생성 포함 모든 자막 시도
+        try:
+            transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ko', 'en'])
+        except NoTranscriptFound:
+            # 지정 언어가 없으면 가능한 모든 언어 중 첫 번째 것을 가져옴
+            transcript_list_all = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = transcript_list_all.find_generated_transcript(['ko', 'en']).fetch()
+
         text_data = " ".join([t['text'] for t in transcript_list])
         return text_data, None
 
+    except TranscriptsDisabled:
+        return None, "이 영상은 자막이 비활성화되어 있습니다."
     except Exception as e:
-        return None, f"자막을 가져올 수 없습니다: {str(e)}"
+        return None, f"자막 수집 실패 ({type(e).__name__}): {str(e)}"
 
 def get_instagram_data(url):
     """
-    (기존 기능) 인스타그램 릴스/게시물 데이터를 가져옵니다.
+    인스타그램 릴스/게시물 데이터를 가져옵니다.
     """
     try:
         apify_token = os.getenv("APIFY_API_TOKEN")
@@ -39,7 +54,6 @@ def get_instagram_data(url):
         client = ApifyClient(apify_token)
         run_input = {"urls": [url]}
         
-        # Apify Actor 실행 (instagram-scraper)
         run = client.actor("apify/instagram-scraper").call(run_input=run_input)
         
         dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
@@ -54,17 +68,17 @@ def get_instagram_data(url):
 
 def download_video(url):
     """
-    (새로운 기능) 유튜브 영상을 MP4 파일로 다운로드합니다.
+    유튜브 영상을 MP4 파일로 다운로드합니다.
     """
-    # 임시 파일명 생성 (겹치지 않게 랜덤 이름 사용)
     filename = f"video_{uuid.uuid4()}.mp4"
     
     ydl_opts = {
-        'format': 'best[ext=mp4]/best', # 화질 적당히, mp4 형식 우선
+        'format': 'best[ext=mp4]/best',
         'outtmpl': filename,
         'quiet': True,
         'no_warnings': True,
-        # 10분(600초) 넘는 영상은 다운로드 안 함 (서버 용량 보호)
+        # 스트림릿 클라우드 IP 차단 우회를 위한 설정 (가볍게 시도)
+        'nocheckcertificate': True,
         'match_filter': yt_dlp.utils.match_filter_func("duration < 600"), 
     }
 
@@ -75,10 +89,10 @@ def download_video(url):
         if os.path.exists(filename):
             return filename, None
         else:
-            return None, "다운로드 실패: 파일이 생성되지 않았습니다."
+            return None, "파일 생성 실패"
             
     except Exception as e:
-        # 실패 시 혹시 생긴 쓰레기 파일 삭제
         if os.path.exists(filename):
             os.remove(filename)
-        return None, f"다운로드 에러: {str(e)}"
+        # 에러 메시지를 너무 길게 출력하지 않음
+        return None, "다운로드 실패 (서버 IP 차단 가능성 높음)"
