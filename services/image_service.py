@@ -10,7 +10,7 @@ FONT_PATH = os.path.join("fonts", "Hakgyoansim_OcarinaR.ttf")
 def load_font(size):
     """폰트를 불러오는 헬퍼 함수"""
     try:
-        # [수정] 호환성을 위해 layout_engine 옵션 제거 (이게 에러 원인이었습니다)
+        # 호환성을 위해 layout_engine 옵션 사용 안 함
         return ImageFont.truetype(FONT_PATH, size)
     except IOError:
         print(f"\n⚠️ [경고] 폰트 파일을 찾을 수 없습니다: {FONT_PATH}")
@@ -26,7 +26,7 @@ def generate_qr_code(link):
 
 def wrap_text_pixel_based(text, font, max_width):
     """
-    주어진 픽셀 너비를 넘어가지 않도록 줄바꿈
+    주어진 픽셀 너비를 넘어가지 않도록 줄바꿈 (안전한 방식)
     """
     if not text:
         return ""
@@ -36,7 +36,7 @@ def wrap_text_pixel_based(text, font, max_width):
     
     for char in text:
         test_line = current_line + char
-        # getlength는 구버전 Pillow에서도 대부분 지원하지만, 혹시 모를 안전장치
+        # 안전한 너비 계산
         try:
             width = font.getlength(test_line)
         except AttributeError:
@@ -52,7 +52,7 @@ def wrap_text_pixel_based(text, font, max_width):
     return "\n".join(lines)
 
 def create_restaurant_card(restaurant_data):
-    # 1. 캔버스 준비
+    # 1. 캔버스 준비 (600x800)
     canvas_width = 600
     canvas_height = 800
     background_color = (255, 255, 255)
@@ -62,14 +62,16 @@ def create_restaurant_card(restaurant_data):
     # 폰트 로드
     font_title = load_font(38)
     font_text = load_font(22)
-    font_small = load_font(16)
+    # 주소용 작은 폰트는 이제 필요 없음
 
+    # 레이아웃 설정
     margin = 30
-    text_start_y = 430
+    text_start_y = 430 # 텍스트 시작 높이
     qr_size = 180
+    # 텍스트가 QR코드를 침범하지 않도록 안전 너비 계산
     safe_text_width = canvas_width - margin - qr_size - 20 
 
-    # --- 이미지 다운로드 ---
+    # --- 상단 이미지 영역 ---
     photo_url = restaurant_data.get('사진URL')
     if photo_url:
         try:
@@ -88,64 +90,48 @@ def create_restaurant_card(restaurant_data):
         draw.rectangle([(0,0), (canvas_width, 400)], fill=(230, 230, 230))
         draw.text((250, 180), "사진 없음", font=font_text, fill=(100,100,100))
 
-    # --- 텍스트 그리기 ---
+    # --- 하단 정보 영역 ---
     name = restaurant_data.get('식당이름', '이름 모름')
     rating = restaurant_data.get('평점', 0)
     description = restaurant_data.get('특징', '')
-    address = restaurant_data.get('주소', '')
     map_link = restaurant_data.get('지도링크')
+    # 주소 데이터는 이제 안 씁니다.
 
+    # 폰트 색상
     fill_black = (0, 0, 0)
     fill_orange = (255, 165, 0)
     fill_gray = (50, 50, 50)
-    fill_light_gray = (100, 100, 100)
-    
     if font_title.getname()[0] == "Default": 
-        fill_black = fill_orange = fill_gray = fill_light_gray = None
+        fill_black = fill_orange = fill_gray = None
 
-    draw.text((margin, text_start_y), name, font=font_title, fill=fill_black)
-    
-    current_y = text_start_y + 50
-    if rating > 0:
-        draw.text((margin, current_y), f"⭐ 구글 평점: {rating}점", font=font_text, fill=fill_orange)
-    
-    current_y += 50
-    if description:
-        draw.text((margin, current_y), "💡 특징:", font=font_text, fill=fill_gray)
-        current_y += 30
-        wrapped_desc = wrap_text_pixel_based(description, font_text, safe_text_width)
-        draw.text((margin, current_y), wrapped_desc, font=font_text, fill=fill_gray)
-
+    # [수정 1] QR코드 배치 (우측 상단, 타이틀 높이에 맞춤)
     if map_link:
         qr_img = generate_qr_code(map_link)
         qr_x = canvas_width - qr_img.width - margin
-        qr_y = canvas_height - qr_img.height - margin
+        qr_y = text_start_y # 텍스트 시작점과 높이를 맞춥니다.
         card.paste(qr_img, (qr_x, qr_y))
 
-    if address:
-        address_y = canvas_height - margin - 20
-        final_address = address
-        
-        # 주소 길이 계산 (안전하게 처리)
-        try:
-            addr_width = font_small.getlength("📍 " + address)
-        except:
-            addr_width = font_small.getsize("📍 " + address)[0]
+    # --- 텍스트 그리기 (QR코드 왼쪽 영역에) ---
+    
+    # 1. 식당 이름
+    draw.text((margin, text_start_y), name, font=font_title, fill=fill_black)
+    
+    # 2. 평점
+    current_y = text_start_y + 50
+    if rating > 0:
+        # [수정 2] 하이픈(-) 추가
+        draw.text((margin, current_y), f"- ⭐ 구글 평점: {rating}점", font=font_text, fill=fill_orange)
+    
+    # 3. 특징
+    current_y += 50
+    if description:
+        # [수정 3] 하이픈(-) 추가
+        draw.text((margin, current_y), "- 💡 특징:", font=font_text, fill=fill_gray)
+        current_y += 30
+        # 계산된 안전 너비 내에서 줄바꿈
+        wrapped_desc = wrap_text_pixel_based(description, font_text, safe_text_width)
+        draw.text((margin, current_y), wrapped_desc, font=font_text, fill=fill_gray)
 
-        if addr_width > safe_text_width:
-            for i in range(len(address), 0, -1):
-                temp_addr = "📍 " + address[:i] + "..."
-                try:
-                    w = font_small.getlength(temp_addr)
-                except:
-                    w = font_small.getsize(temp_addr)[0]
-                
-                if w <= safe_text_width:
-                    final_address = address[:i] + "..."
-                    break
-        else:
-            final_address = "📍 " + address
-
-        draw.text((margin, address_y), final_address, font=font_small, fill=fill_light_gray)
+    # [수정 4] 주소 그리는 부분 완전히 삭제됨
 
     return card
