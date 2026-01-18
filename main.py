@@ -6,6 +6,8 @@ import services.scraper_service as scraper
 import services.ai_service as ai
 import services.map_service as map_api
 import services.notion_service as notion
+# [추가] 이미지 생성 서비스 임포트
+import services.image_service as image_gen 
 
 st.set_page_config(page_title="AI 큐레이터", page_icon="✈️", layout="centered")
 
@@ -14,6 +16,8 @@ st.markdown("""
     .main-header {text-align: center; margin-bottom: 1rem;}
     .stTextInput input {text-align: center;}
     .place-title {font-size: 1.2rem; font-weight: bold; color: #1f77b4;}
+    /* 이미지 카드 캡션 스타일 */
+    .stImageCaption {font-size: 0.8rem; color: #666; text-align: center;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,7 +85,7 @@ if st.session_state.analysis_result:
         place_link = map_api.get_map_link(p_map['place_id']) if p_map else ""
         photo = p_map.get('photo_url') if p_map else None
 
-        save_data.append({
+        current_place_data = {
             "식당이름": name,
             "평점": rating,
             "특징": p_ai['description'],
@@ -89,56 +93,79 @@ if st.session_state.analysis_result:
             "지도링크": place_link,
             "원본영상": result["url"],
             "사진URL": photo 
-        })
+        }
+        save_data.append(current_place_data)
 
+        # --- 기존 UI ---
         with st.container():
-            col1, col2, col3 = st.columns([1, 2, 1])
+            col1, col2 = st.columns([3, 1])
             with col1:
-                if photo:
-                    st.image(photo, use_container_width=True)
-                else:
-                    st.markdown("📷 사진 없음")
-            with col2:
                 st.markdown(f"<div class='place-title'>{name}</div>", unsafe_allow_html=True)
                 st.caption(f"💡 {p_ai['description']}")
                 if p_map:
                     st.markdown(f"⭐ **{p_map['rating']}** ({p_map['user_ratings_total']:,})")
-            with col3:
+            with col2:
                 if p_map:
                     st.link_button("지도 보기 🗺️", place_link)
                 else:
                     st.button("정보 없음", disabled=True, key=name)
-            st.markdown("---")
-
-    # --- [수정된 저장 섹션] ---
-    st.subheader("💾 리스트 저장")
-    
-    if save_data:
-        col_csv, col_notion = st.columns(2)
+            
+        # --- [신규 기능 2] 이미지 카드 생성 및 출력 ---
+        # 지도 링크가 있는 경우에만 카드를 만듭니다.
+        if place_link:
+            with st.spinner(f"'{name}' 카드 이미지 생성 중..."):
+                card_image = image_gen.create_restaurant_card(current_place_data)
+                # 이미지를 화면에 표시합니다. (사용자는 이걸 꾹 눌러 저장할 수 있습니다)
+                st.image(card_image, caption="☝️ 꾹 눌러서 이미지 저장/공유하세요! (QR코드 포함)", use_container_width=True)
         
-        with col_csv:
-            # 1. 엑셀 다운로드 (웹 버전용)
-            df = pd.DataFrame(save_data)
-            df_clean = df.drop(columns=['사진URL'], errors='ignore')
-            
-            # 데이터프레임을 CSV 문자열로 변환
-            csv_data = df_clean.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            
-            # '다운로드 버튼' 기능 사용
-            st.download_button(
-                label="내 컴퓨터로 엑셀 다운로드 💾",
-                data=csv_data,
-                file_name=f"맛집리스트_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        st.markdown("---")
 
-        with col_notion:
-            # 2. 노션 저장 (클라우드 데이터베이스)
-            if st.button("노션(Notion)에 저장 🚀", type="primary", use_container_width=True):
-                with st.spinner("노션으로 데이터를 보내는 중..."):
+
+    # --- [수정된 공유 및 저장 섹션] ---
+    st.divider()
+    st.subheader("📤 결과 공유 및 저장")
+    
+    tab1, tab2, tab3 = st.tabs(["💬 텍스트 복사", "📊 엑셀(표) 복사/다운", "🔒 관리자"])
+    
+    with tab1:
+        # (기존 카톡 복사 기능)
+        share_text = f"[✈️ AI가 요약한 맛집 리스트]\n원본영상: {result['url']}\n\n"
+        for item in save_data:
+            share_text += f"📍 {item['식당이름']}"
+            if item['평점'] > 0: share_text += f" (⭐{item['평점']})"
+            share_text += f"\n💡 {item['특징']}\n"
+            if item['지도링크']: share_text += f"🔗 지도: {item['지도링크']}\n"
+            share_text += "------------------\n"
+        st.code(share_text, language="text")
+
+    with tab2:
+        # [신규 기능 1] 인라인 엑셀 표 (드래그 복사 가능)
+        st.write("마우스로 드래그해서 복사(Ctrl+C) 후 엑셀에 붙여넣기(Ctrl+V) 할 수 있습니다.")
+        
+        df = pd.DataFrame(save_data)
+        df_clean = df.drop(columns=['사진URL'], errors='ignore')
+        
+        # interactive한 표를 그려줍니다.
+        st.dataframe(df_clean, hide_index=True, use_container_width=True)
+        
+        st.write("") # 여백
+        
+        # 기존 엑셀 다운로드 버튼
+        csv_data = df_clean.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+        st.download_button(
+            label="엑셀 파일로 다운로드 (.csv) 📥",
+            data=csv_data,
+            file_name=f"맛집리스트_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    with tab3:
+        # (기존 관리자 노션 저장 기능)
+        admin_password = st.text_input("관리자 키를 입력하세요", type="password")
+        if admin_password == "1234": 
+            if st.button("내 노션에 저장하기 🚀", type="primary", use_container_width=True):
+                with st.spinner("노션으로 전송 중..."):
                     success, msg = notion.save_to_notion(save_data)
-                    if success:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
+                    if success: st.success(msg)
+                    else: st.error(msg)
