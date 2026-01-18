@@ -1,18 +1,13 @@
 import os
 import uuid
 import yt_dlp
+import sys
+# [수정] 충돌 방지를 위해 모듈 전체를 임포트
+import youtube_transcript_api
+from youtube_transcript_api import YouTubeTranscriptApi
+
 from apify_client import ApifyClient
 from dotenv import load_dotenv
-
-# [디버깅 & 안전장치] 라이브러리 위치 확인 및 임포트
-try:
-    import youtube_transcript_api
-    # 실제 라이브러리가 어디서 로딩되는지 로그에 찍어봅니다.
-    print(f"DEBUG: youtube_transcript_api loaded from: {youtube_transcript_api.__file__}")
-    from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-except (ImportError, AttributeError) as e:
-    print(f"DEBUG: Library Import Failed: {e}")
-    YouTubeTranscriptApi = None
 
 load_dotenv()
 
@@ -20,9 +15,6 @@ def get_youtube_data(url):
     """
     유튜브 영상의 자막(Transcript)을 텍스트로 가져옵니다.
     """
-    if YouTubeTranscriptApi is None:
-        return None, "❌ 라이브러리 로드 실패. (로그를 확인하세요)"
-
     try:
         video_id = ""
         if "youtu.be" in url:
@@ -32,24 +24,19 @@ def get_youtube_data(url):
         elif "shorts" in url:
             video_id = url.split("shorts/")[1].split("?")[0]
         
-        if not video_id:
-            return None, "영상 ID를 찾을 수 없습니다."
+        if not video_id: return None, "영상 ID 없음"
 
-        # 자막 가져오기
-        transcript_list = None
+        # [수정] 호출 방식 변경 (클래스 직접 호출)
         try:
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ko', 'en'])
         except Exception:
+            # 자동 생성 자막 시도
             try:
-                # 자동 생성 자막 시도
                 transcript_list_all = YouTubeTranscriptApi.list_transcripts(video_id)
                 transcript = transcript_list_all.find_generated_transcript(['ko', 'en'])
                 transcript_list = transcript.fetch()
-            except Exception:
-                pass
-
-        if not transcript_list:
-             return None, "자막을 찾을 수 없습니다."
+            except:
+                return None, "자막을 찾을 수 없습니다."
 
         text_data = " ".join([t['text'] for t in transcript_list])
         return text_data, None
@@ -57,7 +44,7 @@ def get_youtube_data(url):
     except Exception as e:
         return None, f"자막 에러: {str(e)}"
 
-# --- (나머지 함수는 그대로) ---
+# --- 인스타그램은 기존과 동일 ---
 def get_instagram_data(url):
     try:
         apify_token = os.getenv("APIFY_API_TOKEN")
@@ -72,6 +59,9 @@ def get_instagram_data(url):
     except Exception as e: return None, str(e)
 
 def download_video(url):
+    """
+    유튜브 영상 다운로드 (실패 시 안전하게 처리)
+    """
     filename = f"video_{uuid.uuid4()}.mp4"
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
@@ -81,11 +71,19 @@ def download_video(url):
         'nocheckcertificate': True,
         'match_filter': yt_dlp.utils.match_filter_func("duration < 600"), 
     }
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        if os.path.exists(filename): return filename, None
-        return None, "파일 생성 실패"
+            
+        # [중요] 파일이 존재하고, 크기가 0보다 커야 성공
+        if os.path.exists(filename) and os.path.getsize(filename) > 0:
+            return filename, None
+        else:
+            # 빈 파일이면 삭제
+            if os.path.exists(filename): os.remove(filename)
+            return None, "다운로드 실패 (빈 파일)"
+            
     except Exception as e:
         if os.path.exists(filename): os.remove(filename)
-        return None, "다운로드 실패"
+        return None, "다운로드 에러 (IP 차단됨)"
