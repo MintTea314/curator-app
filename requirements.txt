@@ -2,8 +2,8 @@ streamlit
 google-genai
 python-dotenv
 pandas
-yt-dlp
-youtube-transcript-api
+yt-dlp>=2024.10.0
+youtube-transcript-api>=0.6.2
 apify-client
 requests
 Pillow
