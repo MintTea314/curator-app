@@ -4,22 +4,24 @@ import yt_dlp
 from apify_client import ApifyClient
 from dotenv import load_dotenv
 
-load_dotenv()
-
-# [안전 장치] 라이브러리 설치 여부 확인 및 안전한 임포트
+# [디버깅 & 안전장치] 라이브러리 위치 확인 및 임포트
 try:
     import youtube_transcript_api
+    # 실제 라이브러리가 어디서 로딩되는지 로그에 찍어봅니다.
+    print(f"DEBUG: youtube_transcript_api loaded from: {youtube_transcript_api.__file__}")
     from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-except (ImportError, AttributeError):
+except (ImportError, AttributeError) as e:
+    print(f"DEBUG: Library Import Failed: {e}")
     YouTubeTranscriptApi = None
+
+load_dotenv()
 
 def get_youtube_data(url):
     """
     유튜브 영상의 자막(Transcript)을 텍스트로 가져옵니다.
     """
-    # 1. 라이브러리가 없는 경우
     if YouTubeTranscriptApi is None:
-        return None, "❌ 'youtube-transcript-api' 라이브러리가 설치되지 않았습니다. requirements.txt를 확인해주세요."
+        return None, "❌ 라이브러리 로드 실패. (로그를 확인하세요)"
 
     try:
         video_id = ""
@@ -33,31 +35,29 @@ def get_youtube_data(url):
         if not video_id:
             return None, "영상 ID를 찾을 수 없습니다."
 
-        # 2. 자막 가져오기 시도 (한국어 -> 영어 -> 자동생성)
+        # 자막 가져오기
         transcript_list = None
         try:
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ko', 'en'])
-        except NoTranscriptFound:
+        except Exception:
             try:
-                # 자동 생성 자막이라도 가져오기
+                # 자동 생성 자막 시도
                 transcript_list_all = YouTubeTranscriptApi.list_transcripts(video_id)
                 transcript = transcript_list_all.find_generated_transcript(['ko', 'en'])
                 transcript_list = transcript.fetch()
             except Exception:
-                pass # 아래에서 처리
+                pass
 
         if not transcript_list:
-             return None, "자막을 찾을 수 없습니다. (영상에 자막이 없거나 자동 생성도 안 됨)"
+             return None, "자막을 찾을 수 없습니다."
 
         text_data = " ".join([t['text'] for t in transcript_list])
         return text_data, None
 
-    except TranscriptsDisabled:
-        return None, "이 영상은 자막 기능이 꺼져 있습니다."
     except Exception as e:
-        return None, f"자막 읽기 에러: {str(e)}"
+        return None, f"자막 에러: {str(e)}"
 
-# --- (아래 함수들은 기존 유지) ---
+# --- (나머지 함수는 그대로) ---
 def get_instagram_data(url):
     try:
         apify_token = os.getenv("APIFY_API_TOKEN")
@@ -78,7 +78,7 @@ def download_video(url):
         'outtmpl': filename,
         'quiet': True,
         'no_warnings': True,
-        'nocheckcertificate': True, # IP 차단 우회 시도
+        'nocheckcertificate': True,
         'match_filter': yt_dlp.utils.match_filter_func("duration < 600"), 
     }
     try:
