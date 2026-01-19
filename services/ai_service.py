@@ -15,8 +15,10 @@ def get_client():
     return genai.Client(api_key=api_key)
 
 def summarize_text(text):
-    # (기존 함수 내용 유지)
     client = get_client()
+    
+    # [수정 완료] 선생님과 약속했던 바로 그 모델
+    model_name = 'gemini-2.5-pro' 
     
     prompt = f"""
     너는 '여행 맛집 데이터 복원 전문가'야.
@@ -44,25 +46,39 @@ def summarize_text(text):
         ]
     }}
     """
+
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model=model_name,
             contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type='application/json')
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json'
+            )
         )
-        if response.text: return json.loads(response.text)
-        return {"summary": "AI 응답 비어있음", "places": []}
+        
+        if response.text:
+            return json.loads(response.text)
+        else:
+            return {"summary": "AI 응답이 비어있습니다.", "places": []}
+            
     except Exception as e:
-        return {"summary": f"에러: {str(e)}", "places": []}
+        print(f"AI 에러 상세: {e}")
+        return {
+            "summary": f"AI 분석 실패: {str(e)}",
+            "places": []
+        }
 
 def summarize_reviews(reviews_list):
     """
-    [신규 기능] 구글 리뷰 리스트를 받아 2줄로 요약합니다.
+    구글 리뷰 요약 (여기도 2.5 Pro 사용)
     """
     if not reviews_list:
         return ""
     
     client = get_client()
+    # [수정 완료] 약속한 모델명 유지
+    model_name = 'gemini-2.5-pro'
+    
     reviews_text = "\n".join(reviews_list)
     
     prompt = f"""
@@ -72,16 +88,11 @@ def summarize_reviews(reviews_list):
     
     [리뷰 목록]
     {reviews_text}
-    
-    [답변 형식]
-    (예시)
-    국물이 진하고 고기가 부드러워 해장하기 좋음.
-    웨이팅이 길지만 회전율이 빠르고 직원이 친절함.
     """
     
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model=model_name,
             contents=prompt
         )
         return response.text.strip()
