@@ -44,19 +44,29 @@ if submit_button and url:
             st.error(error)
             st.stop()
         
-        # 2. AI 분석 (추리 모드)
-        st.write("🧠 AI가 엉망인 자막 속에서 진짜 맛집 이름을 추리하는 중...")
+        # 2. AI 분석
+        st.write("🧠 AI가 자막을 분석하고 맛집 이름을 추리하는 중...")
         ai_result = ai.summarize_text(content)
         
-        # 3. 지도 정보 찾기
+        # 3. 지도 정보 & 리뷰 요약 찾기
         places_data = []
         if ai_result.get("places"):
-            st.write("📸 구글 지도에서 위치와 사진을 찾는 중...")
+            st.write("📸 구글 지도 검색 & 실제 리뷰 분석 중...")
             for place in ai_result["places"]:
+                # (1) 지도 기본 정보 검색
                 map_info = map_api.search_place(place["search_query"])
+                
+                review_summary = ""
+                if map_info:
+                    # (2) [신규] 리뷰 가져오기 & AI 요약
+                    reviews = map_api.get_place_reviews(map_info['place_id'])
+                    if reviews:
+                        review_summary = ai.summarize_reviews(reviews)
+
                 places_data.append({
                     "ai_info": place,
-                    "map_info": map_info
+                    "map_info": map_info,
+                    "review_summary": review_summary # 데이터 추가
                 })
         
         st.session_state.analysis_result = {
@@ -83,6 +93,7 @@ if st.session_state.analysis_result:
     for item in places_data:
         p_ai = item['ai_info']
         p_map = item['map_info']
+        review_summ = item.get('review_summary', '')
         
         name = p_map['name'] if p_map else p_ai['search_query']
         address = p_map['address'] if p_map else "주소 미상"
@@ -94,6 +105,7 @@ if st.session_state.analysis_result:
             "식당이름": name,
             "평점": rating,
             "특징": p_ai['description'],
+            "리뷰요약": review_summ, # 이미지 서비스로 전달
             "주소": address,
             "지도링크": place_link,
             "원본영상": result["url"],
@@ -107,6 +119,10 @@ if st.session_state.analysis_result:
             with col1:
                 st.markdown(f"<div class='place-title'>{name}</div>", unsafe_allow_html=True)
                 st.caption(f"💡 {p_ai['description']}")
+                # 리뷰 요약이 있으면 보여주기
+                if review_summ:
+                    st.info(f"🗣️ **실제 후기 요약:**\n{review_summ}")
+                    
                 if p_map:
                     st.markdown(f"⭐ **{p_map['rating']}** ({p_map['user_ratings_total']:,})")
             with col2:
@@ -123,7 +139,7 @@ if st.session_state.analysis_result:
         
         st.markdown("---")
 
-    # 공유 및 저장
+    # (하단 공유 섹션은 기존 코드 유지 - 생략)
     st.divider()
     st.subheader("📤 결과 공유 및 저장")
     
@@ -135,6 +151,7 @@ if st.session_state.analysis_result:
             share_text += f"📍 {item['식당이름']}"
             if item['평점'] > 0: share_text += f" (⭐{item['평점']})"
             share_text += f"\n💡 {item['특징']}\n"
+            if item['리뷰요약']: share_text += f"🗣️ 후기: {item['리뷰요약'].replace(chr(10), ' ')}\n"
             if item['지도링크']: share_text += f"🔗 지도: {item['지도링크']}\n"
             share_text += "------------------\n"
         st.code(share_text, language="text")
