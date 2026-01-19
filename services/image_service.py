@@ -21,8 +21,8 @@ def generate_qr_code(link):
     qr.add_data(link)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
-    # [수정 1] 사이즈를 100px로 축소 (기존 135px의 약 3/4)
-    return img.resize((100, 100))
+    # [수정 1] QR코드 사이즈 120px로 변경
+    return img.resize((120, 120))
 
 def wrap_text_pixel_based(text, font, max_width):
     """안전한 줄바꿈 함수"""
@@ -33,25 +33,27 @@ def wrap_text_pixel_based(text, font, max_width):
         test_line = current_line + char
         try: width = font.getlength(test_line)
         except AttributeError: width = font.getsize(test_line)[0]
-        if width <= max_width: current_line = test_line
-        else: lines.append(current_line); current_line = char
+        
+        if width <= max_width:
+            current_line = test_line
+        else:
+            lines.append(current_line)
+            current_line = char
     lines.append(current_line)
     return "\n".join(lines)
 
 def draw_list_item(draw, x, y, icon, text, font, color, max_width):
     """
-    [신규 기능] 하이픈과 텍스트 사이 간격을 정밀 조절하는 함수
+    하이픈과 텍스트 사이 간격을 정밀 조절하는 함수 (타이트한 간격 유지)
     """
     # 1. 하이픈 그리기
     draw.text((x, y), "-", font=font, fill=color)
     
-    # 2. 텍스트 위치 계산 (하이픈 너비 - 4px 만큼 당겨서 출력)
-    try:
-        hyphen_width = font.getlength("-")
-    except AttributeError:
-        hyphen_width = font.getsize("-")[0]
+    # 2. 텍스트 위치 계산
+    try: hyphen_width = font.getlength("-")
+    except AttributeError: hyphen_width = font.getsize("-")[0]
         
-    # [수정 2] 간격을 줄이기 위해 오프셋을 살짝 뺍니다 (-4px)
+    # 간격 -4px (타이트하게)
     text_x = x + hyphen_width - 4
     
     # 3. 아이콘+텍스트 그리기
@@ -75,11 +77,12 @@ def create_restaurant_card(restaurant_data):
     margin = 30
     text_start_y = 430
     
-    # [수정 1 관련] QR코드 사이즈와 여백 재설정
-    qr_size = 100
-    qr_right_margin = 0 # 오른쪽 끝에 딱 붙임
-
-    safe_text_width = canvas_width - margin - qr_size - qr_right_margin - 20
+    # [수정 2] QR코드 설정 (120px, 하단 배치용)
+    qr_size = 120
+    
+    # QR코드가 하단으로 갔으니, 텍스트는 가로폭을 넓게 씁니다.
+    # (전체 폭 - 양쪽 마진)
+    full_text_width = canvas_width - (margin * 2)
 
     # --- 상단 이미지 영역 ---
     photo_url = restaurant_data.get('사진URL')
@@ -112,33 +115,35 @@ def create_restaurant_card(restaurant_data):
     if font_title.getname()[0] == "Default": 
         fill_black = fill_orange = fill_gray = None
 
-    # [수정 3] QR코드 배치 (완전 오른쪽 끝)
+    # [수정 3] QR코드 배치 (우측 하단 구석)
     if map_link:
         qr_img = generate_qr_code(map_link)
-        qr_x = canvas_width - qr_img.width - qr_right_margin
-        qr_y = text_start_y
+        # 캔버스 끝에서 마진(30px)만큼 띄움
+        qr_x = canvas_width - qr_img.width - margin
+        qr_y = canvas_height - qr_img.height - margin
         card.paste(qr_img, (qr_x, qr_y))
 
     # --- 텍스트 그리기 ---
+    
     # 1. 식당 이름
     draw.text((margin, text_start_y), name, font=font_title, fill=fill_black)
     
-    # 2. 평점 (리스트 함수 사용)
+    # 2. 평점
     current_y = text_start_y + 50
     if rating > 0:
         draw_list_item(
             draw, margin, current_y, "⭐", 
             f"구글 평점: {rating}점", 
-            font_text, fill_orange, safe_text_width
+            font_text, fill_orange, full_text_width
         )
     
-    # 3. 특징 (리스트 함수 사용)
+    # 3. 특징
     current_y += 50
     if description:
         draw_list_item(
             draw, margin, current_y, "💡", 
             f"특징: {description}", 
-            font_text, fill_gray, safe_text_width
+            font_text, fill_gray, full_text_width
         )
 
     return card
