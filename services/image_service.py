@@ -7,13 +7,8 @@ import os
 FONT_PATH = os.path.join("fonts", "Hakgyoansim_OcarinaR.ttf")
 
 def load_font(size):
-    """폰트를 불러오는 헬퍼 함수"""
-    try:
-        # [수정] 에러를 유발하는 layout_engine 옵션 완전 삭제!
-        return ImageFont.truetype(FONT_PATH, size)
-    except IOError:
-        print(f"\n⚠️ [경고] 폰트 파일을 찾을 수 없습니다: {FONT_PATH}")
-        return ImageFont.load_default()
+    try: return ImageFont.truetype(FONT_PATH, size)
+    except IOError: return ImageFont.load_default()
 
 def generate_qr_code(link):
     """QR코드 생성 (120px)"""
@@ -24,7 +19,6 @@ def generate_qr_code(link):
     return img.resize((120, 120))
 
 def wrap_text_pixel_based(text, font, max_width):
-    """안전한 줄바꿈 함수"""
     if not text: return ""
     lines = []
     current_line = ""
@@ -32,36 +26,27 @@ def wrap_text_pixel_based(text, font, max_width):
         test_line = current_line + char
         try: width = font.getlength(test_line)
         except AttributeError: width = font.getsize(test_line)[0]
-        
-        if width <= max_width:
-            current_line = test_line
-        else:
-            lines.append(current_line)
-            current_line = char
+        if width <= max_width: current_line = test_line
+        else: lines.append(current_line); current_line = char
     lines.append(current_line)
     return "\n".join(lines)
 
 def draw_list_item(draw, x, y, icon, text, font, color, max_width):
     """항목 그리기 (하이픈 간격 좁게)"""
-    # 1. 하이픈
     draw.text((x, y), "-", font=font, fill=color)
     try: hyphen_width = font.getlength("-")
     except AttributeError: hyphen_width = font.getsize("-")[0]
-    
-    # 간격 좁히기 (-4px)
     text_x = x + hyphen_width - 4
     
-    # 2. 본문
     full_text = f"{icon} {text}" if icon else text
+    # [중요] 전달받은 max_width를 사용하여 안전하게 줄바꿈
     wrapped_text = wrap_text_pixel_based(full_text, font, max_width - (text_x - x))
     draw.text((text_x, y), wrapped_text, font=font, fill=color)
     
-    # 다음 줄 높이 계산 (줄바꿈 수 * 30px + 여백 10px)
     lines_count = wrapped_text.count('\n') + 1
     return y + (lines_count * 30) + 10 
 
 def create_restaurant_card(restaurant_data):
-    # 1. 캔버스 준비 (600x800)
     canvas_width = 600
     canvas_height = 800
     background_color = (255, 255, 255)
@@ -73,9 +58,17 @@ def create_restaurant_card(restaurant_data):
 
     margin = 30
     text_start_y = 430
+    qr_size = 120
     
-    # 가로폭 넓게 사용 (QR코드가 하단으로 갔으므로)
-    full_text_width = canvas_width - (margin * 2)
+    map_link = restaurant_data.get('지도링크')
+
+    # [수정] 텍스트 안전 너비 계산
+    if map_link:
+        # QR코드가 있으면: 전체폭 - 양쪽마진 - QR폭 - 여유공간(20px)
+        safe_text_width = canvas_width - (margin * 2) - qr_size - 20
+    else:
+        # QR코드가 없으면: 전체폭 - 양쪽마진 (넓게 사용)
+        safe_text_width = canvas_width - (margin * 2)
 
     # --- 상단 이미지 ---
     photo_url = restaurant_data.get('사진URL')
@@ -100,14 +93,13 @@ def create_restaurant_card(restaurant_data):
     name = restaurant_data.get('식당이름', '이름 모름')
     rating = restaurant_data.get('평점', 0)
     description = restaurant_data.get('특징', '')
-    review_summ = restaurant_data.get('리뷰요약', '') # 리뷰 요약 추가
-    map_link = restaurant_data.get('지도링크')
-
+    review_summ = restaurant_data.get('리뷰요약', '')
+    
     # 색상 설정
     fill_black = (0, 0, 0)
     fill_orange = (255, 165, 0)
     fill_gray = (50, 50, 50)
-    fill_blue = (30, 100, 200) # 파란색 (리뷰용)
+    fill_blue = (30, 100, 200)
     
     if font_title.getname()[0] == "Default": 
         fill_black = fill_orange = fill_gray = fill_blue = None
@@ -119,7 +111,7 @@ def create_restaurant_card(restaurant_data):
         qr_y = canvas_height - qr_img.height - margin
         card.paste(qr_img, (qr_x, qr_y))
 
-    # --- 텍스트 그리기 (차곡차곡 쌓기) ---
+    # --- 텍스트 그리기 (safe_text_width 사용) ---
     
     # 1. 식당 이름
     draw.text((margin, text_start_y), name, font=font_title, fill=fill_black)
@@ -130,23 +122,23 @@ def create_restaurant_card(restaurant_data):
         current_y = draw_list_item(
             draw, margin, current_y, "⭐", 
             f"구글 평점: {rating}점", 
-            font_text, fill_orange, full_text_width
+            font_text, fill_orange, safe_text_width
         )
     
-    # 3. 특징 (영상 내용)
+    # 3. 특징
     if description:
         current_y = draw_list_item(
             draw, margin, current_y, "💡", 
             f"특징: {description}", 
-            font_text, fill_gray, full_text_width
+            font_text, fill_gray, safe_text_width
         )
 
-    # 4. 후기 요약 (구글 리뷰) - 파란색
+    # 4. 후기 요약
     if review_summ:
         draw_list_item(
             draw, margin, current_y, "🗣️", 
             f"후기: {review_summ}", 
-            font_text, fill_blue, full_text_width
+            font_text, fill_blue, safe_text_width
         )
 
     return card
