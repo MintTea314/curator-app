@@ -27,7 +27,8 @@ if "analysis_result" not in st.session_state:
 
 with st.form(key='analysis_form'):
     url = st.text_input(label="링크 입력", placeholder="https://youtube.com/shorts/...", label_visibility="collapsed")
-    submit_button = st.form_submit_button(label="분석 시작 🚀", type="primary", use_container_width=True)
+    # [수정 1] use_container_width=True -> width="stretch" (최신 문법 적용)
+    submit_button = st.form_submit_button(label="분석 시작 🚀", type="primary", width="stretch")
 
 if submit_button and url:
     with st.status("🕵️ 맛집을 찾고 있습니다...", expanded=True) as status:
@@ -58,7 +59,7 @@ if submit_button and url:
                 
                 review_summary = ""
                 if map_info:
-                    # (2) [신규] 리뷰 가져오기 & AI 요약
+                    # (2) 리뷰 가져오기 & AI 요약
                     reviews = map_api.get_place_reviews(map_info['place_id'])
                     if reviews:
                         review_summary = ai.summarize_reviews(reviews)
@@ -66,7 +67,7 @@ if submit_button and url:
                 places_data.append({
                     "ai_info": place,
                     "map_info": map_info,
-                    "review_summary": review_summary # 데이터 추가
+                    "review_summary": review_summary
                 })
         
         st.session_state.analysis_result = {
@@ -105,7 +106,7 @@ if st.session_state.analysis_result:
             "식당이름": name,
             "평점": rating,
             "특징": p_ai['description'],
-            "리뷰요약": review_summ, # 이미지 서비스로 전달
+            "리뷰요약": review_summ,
             "주소": address,
             "지도링크": place_link,
             "원본영상": result["url"],
@@ -119,7 +120,6 @@ if st.session_state.analysis_result:
             with col1:
                 st.markdown(f"<div class='place-title'>{name}</div>", unsafe_allow_html=True)
                 st.caption(f"💡 {p_ai['description']}")
-                # 리뷰 요약이 있으면 보여주기
                 if review_summ:
                     st.info(f"🗣️ **실제 후기 요약:**\n{review_summ}")
                     
@@ -135,11 +135,12 @@ if st.session_state.analysis_result:
         if place_link:
             with st.spinner(f"'{name}' 카드 이미지 생성 중..."):
                 card_image = image_gen.create_restaurant_card(current_place_data)
-                st.image(card_image, caption="☝️ 꾹 눌러서 이미지 저장/공유하세요! (QR코드 포함)", use_container_width=True)
+                # [수정 2] 에러를 유발하는 use_container_width 삭제 (기본값으로 충분함)
+                st.image(card_image, caption="☝️ 꾹 눌러서 이미지 저장/공유하세요! (QR코드 포함)")
         
         st.markdown("---")
 
-    # (하단 공유 섹션은 기존 코드 유지 - 생략)
+    # 하단 공유 섹션
     st.divider()
     st.subheader("📤 결과 공유 및 저장")
     
@@ -160,15 +161,18 @@ if st.session_state.analysis_result:
         st.write("마우스로 드래그해서 복사(Ctrl+C) 후 엑셀에 붙여넣기(Ctrl+V) 할 수 있습니다.")
         df = pd.DataFrame(save_data)
         df_clean = df.drop(columns=['사진URL'], errors='ignore')
-        st.dataframe(df_clean, hide_index=True, use_container_width=True)
+        # [수정 3] use_container_width 제거
+        st.dataframe(df_clean, hide_index=True)
         st.write("") 
         csv_data = df_clean.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-        st.download_button("엑셀 파일로 다운로드 (.csv) 📥", csv_data, f"맛집리스트.csv", "text/csv", use_container_width=True)
+        # [수정 4] use_container_width 제거 (필요시 help 사용 등)
+        st.download_button("엑셀 파일로 다운로드 (.csv) 📥", csv_data, f"맛집리스트.csv", "text/csv")
 
     with tab3:
         admin_password = st.text_input("관리자 키를 입력하세요", type="password")
         if admin_password == "1234": 
-            if st.button("내 노션에 저장하기 🚀", type="primary", use_container_width=True):
+            # [수정 5] use_container_width=True -> width="stretch"
+            if st.button("내 노션에 저장하기 🚀", type="primary", width="stretch"):
                 with st.spinner("노션으로 전송 중..."):
                     success, msg = notion.save_to_notion(save_data)
                     if success: st.success(msg)
