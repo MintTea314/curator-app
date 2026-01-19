@@ -34,6 +34,7 @@ def search_place(query):
             photo_url = None
             if 'photos' in place:
                 photo_reference = place['photos'][0]['photo_reference']
+                # maxwidth를 400으로 설정
                 photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={gmaps.key}"
             
             return {
@@ -45,18 +46,19 @@ def search_place(query):
                 "photo_url": photo_url
             }
         
-        # [진단 기능] OK가 아니라면 에러 메시지 출력
+        # [수정] 에러 발생 시 화면에 표시하지 않고 서버 로그에만 남김
         elif places_result['status'] != 'OK':
             error_msg = places_result.get('error_message', '원인 불명')
-            st.error(f"🚨 구글맵 검색 실패: {places_result['status']} - {error_msg}")
+            print(f"⚠️ 구글맵 검색 실패 (로그 확인 필요): {places_result['status']} - {error_msg}")
             
         return None
 
     except Exception as e:
-        # API 키가 틀렸거나 연결 문제일 때
-        st.error(f"🚨 구글맵 시스템 에러: {str(e)}")
+        # 시스템 에러도 로그에만 기록
+        print(f"🚨 구글맵 시스템 에러: {str(e)}")
         return None
 
+# (나머지 함수는 기존과 동일)
 def get_place_reviews(place_id):
     """리뷰 5개 가져오기"""
     gmaps = get_client()
@@ -68,7 +70,6 @@ def get_place_reviews(place_id):
                 reviews_text.append(review.get('text', ''))
         return reviews_text
     except Exception as e:
-        # 리뷰 가져오기 실패는 치명적이지 않으니 로그만 출력
         print(f"리뷰 에러: {e}")
         return []
 
