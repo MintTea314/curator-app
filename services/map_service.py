@@ -1,77 +1,100 @@
-import googlemaps
 import os
-import streamlit as st
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def get_client():
+def get_google_maps_api_key():
     try:
-        api_key = st.secrets["GOOGLE_MAPS_API_KEY"]
-    except:
-        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-    return googlemaps.Client(key=api_key)
+        return os.environ["GOOGLE_MAPS_API_KEY"]
+    except KeyError:
+        print("Error: GOOGLE_MAPS_API_KEY not found in .env")
+        return None
 
 def search_place(query):
-    """장소 이름으로 검색해서 기본 정보를 가져옵니다."""
-    gmaps = get_client()
+    """
+    구글 장소 검색 API를 사용하여 장소 정보를 찾습니다.
+    """
+    api_key = get_google_maps_api_key()
+    if not api_key: return None
+
+    # 1. 텍스트 검색 (Find Place Request)
+    search_url = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
+    params = {
+        "input": query,
+        "inputtype": "textquery",
+        # 필요한 필드만 요청 (비용 절약)
+        "fields": "place_id,name,rating,photos,formatted_address",
+        "key": api_key
+    }
+    
     try:
-        # 1. 텍스트 검색
-        places_result = gmaps.places(query=query)
+        response = requests.get(search_url, params=params)
+        response.raise_for_status()
+        data = response.json()
         
-        # 검색 결과가 성공(OK)이고 데이터가 있을 때
-        if places_result['status'] == 'OK' and places_result['results']:
-            place = places_result['results'][0]
-            place_id = place['place_id']
-            
-            # 기본 정보 추출
-            name = place.get('name')
-            address = place.get('formatted_address')
-            rating = place.get('rating', 0.0)
-            user_ratings_total = place.get('user_ratings_total', 0)
-            
-            # 사진 가져오기
-            photo_url = None
-            if 'photos' in place:
-                photo_reference = place['photos'][0]['photo_reference']
-                # maxwidth를 400으로 설정
-                photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={gmaps.key}"
-            
-            return {
-                "name": name,
-                "address": address,
-                "rating": rating,
-                "user_ratings_total": user_ratings_total,
-                "place_id": place_id,
-                "photo_url": photo_url
+        if data.get("status") == "OK" and data.get("candidates"):
+            candidate = data["candidates"][0]
+            result = {
+                "place_id": candidate.get("place_id"),
+                "name": candidate.get("name"),
+                "rating": candidate.get("rating", 0.0),
+                "address": candidate.get("formatted_address"),
+                "photo_url": None
             }
-        
-        # [수정] 에러 발생 시 화면에 표시하지 않고 서버 로그에만 남김
-        elif places_result['status'] != 'OK':
-            error_msg = places_result.get('error_message', '원인 불명')
-            print(f"⚠️ 구글맵 검색 실패 (로그 확인 필요): {places_result['status']} - {error_msg}")
+
+            # 사진이 있으면 첫 번째 사진의 URL 가져오기
+            if candidate.get("photos"):
+                photo_reference = candidate["photos"][0]["photo_reference"]
+                # 사진 크기는 가로 800px로 요청
+                photo_request_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference={photo_reference}&key={api_key}"
+                # 실제 이미지 URL은 리다이렉트된 최종 주소임
+                photo_response = requests.get(photo_request_url, allow_redirects=False)
+                if photo_response.status_code == 302:
+                    result["photo_url"] = photo_response.headers["Location"]
             
-        return None
-
+            return result
+            
     except Exception as e:
-        # 시스템 에러도 로그에만 기록
-        print(f"🚨 구글맵 시스템 에러: {str(e)}")
-        return None
+        print(f"Google Maps API Error: {e}")
+    
+    return None
 
-# (나머지 함수는 기존과 동일)
 def get_place_reviews(place_id):
-    """리뷰 5개 가져오기"""
-    gmaps = get_client()
+    """
+    Place ID로 상세 정보(리뷰 포함)를 가져옵니다.
+    """
+    api_key = get_google_maps_api_key()
+    if not api_key or not place_id: return []
+    
+    details_url = "https://maps.googleapis.com/maps/api/place/details/json"
+    params = {
+        "place_id": place_id,
+        "fields": "reviews", # 리뷰만 요청
+        "language": "ko",    # 한국어 리뷰 우선
+        "key": api_key
+    }
+    
     try:
-        details = gmaps.place(place_id=place_id, fields=['reviews'], language='ko')
-        reviews_text = []
-        if 'result' in details and 'reviews' in details['result']:
-            for review in details['result']['reviews']:
-                reviews_text.append(review.get('text', ''))
-        return reviews_text
+        response = requests.get(details_url, params=params)
+        data = response.json()
+        if data.get("status") == "OK" and data.get("result"):
+            return data["result"].get("reviews", [])
     except Exception as e:
-        print(f"리뷰 에러: {e}")
-        return []
+        print(f"Review API Error: {e}")
+        
+    return []
 
+# ================================================================================
+# [핵심 수정] QR코드용 링크 생성 함수
+# ================================================================================
 def get_map_link(place_id):
-    return f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+    """
+    Place ID를 기반으로 가장 확실한 구글맵 링크를 생성합니다.
+    이 방식(query_place_id)이 모바일/PC 모두에서 가장 잘 작동합니다.
+    """
+    if not place_id:
+        return "https://www.google.com/maps" # 기본 구글맵 주소
+        
+    # 공식적으로 권장되는 특정 장소 공유 링크 형식
+    return f"https://www.google.com/maps/search/?api=1&query=Google&query_place_id={place_id}"
