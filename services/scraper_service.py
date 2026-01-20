@@ -4,7 +4,7 @@ import requests
 from apify_client import ApifyClient
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
-# [변경] yt_dlp 대신 pytubefix 사용
+# [확실하게 변경] yt_dlp 버리고 pytubefix 사용
 from pytubefix import YouTube 
 
 load_dotenv()
@@ -12,16 +12,15 @@ load_dotenv()
 def get_video_file(url):
     """
     URL을 받아 영상 파일(mp4)을 다운로드하고 경로를 반환
-    (유튜브: pytubefix OAuth 인증 / 인스타: Apify)
+    (유튜브: pytubefix OAuth TV인증 / 인스타: Apify)
     """
-    # 임시 파일명 생성
     file_path = f"video_{uuid.uuid4()}.mp4"
     
-    # [1] 인스타그램 (Apify 사용 - 기존 동일)
+    # [1] 인스타그램
     if "instagram.com" in url:
         try:
             apify_token = os.getenv("APIFY_API_TOKEN")
-            if not apify_token: return None, "APIFY 토큰 없음"
+            if not apify_token: return None, "APIFY_API_TOKEN 없음"
             
             client = ApifyClient(apify_token)
             run = client.actor("apify/instagram-reel-scraper").call(run_input={"urls": [url]})
@@ -36,7 +35,7 @@ def get_video_file(url):
                         for chunk in r.iter_content(chunk_size=8192):
                             f.write(chunk)
                 return file_path, None
-            return None, "인스타 링크 찾기 실패"
+            return None, "인스타 영상 링크 실패"
         except Exception as e:
             return None, f"인스타 에러: {str(e)}"
 
@@ -45,15 +44,15 @@ def get_video_file(url):
         try:
             print(f"📺 Pytubefix(TV모드)로 다운로드 시도: {url}")
             
-            # use_oauth=True, allow_oauth_cache=True 옵션이 핵심!
-            # 아까 터미널에서 만든 토큰 파일을 자동으로 읽어옵니다.
+            # use_oauth=True, allow_oauth_cache=True 필수!
+            # 아까 터미널에서 만든 tokens.json을 자동으로 읽어서 인증함
             yt = YouTube(url, use_oauth=True, allow_oauth_cache=True)
             
-            # 가장 해상도 높은 mp4 스트림 선택
+            # 쇼츠/일반 영상 모두 대응하기 위해 스트림 검색 로직 강화
             stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
             
             if not stream:
-                # 쇼츠의 경우 progressive가 없을 수 있어 다시 검색
+                # progressive(영상+음성 합본)가 없으면 영상만이라도 가져오기 (쇼츠 대비)
                 stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
 
             if stream:
@@ -65,19 +64,18 @@ def get_video_file(url):
             return None, "다운로드 실패 (영상 스트림을 찾을 수 없습니다.)"
             
         except Exception as e:
-            # 다운로드 실패 시 파일 삭제
             if os.path.exists(file_path):
                 os.remove(file_path)
             
-            # 혹시 토큰 만료 에러인지 확인
             error_msg = str(e)
+            # 인증 토큰 문제일 경우 안내 메시지 출력
             if "device" in error_msg or "code" in error_msg:
-                return None, "인증 토큰 만료! 터미널에서 다시 인증해주세요."
+                return None, "🚨 인증 토큰 만료! 터미널에서 'python3 -c ...' 명령어로 다시 인증해주세요."
             
             return None, f"유튜브 에러: {error_msg}"
 
 def get_naver_blog_content(url):
-    """네이버 블로그 (기존 동일)"""
+    """네이버 블로그 (기존 유지)"""
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Mobile Safari/537.36"}
         if "blog.naver.com" in url and "m.blog.naver.com" not in url:
@@ -85,10 +83,8 @@ def get_naver_blog_content(url):
 
         response = requests.get(url, headers=headers)
         soup = BeautifulSoup(response.text, 'html.parser')
-        
         content_div = soup.find('div', class_='se-main-container')
         if not content_div: content_div = soup.find('div', class_='post_ct')
-            
-        return content_div.get_text(strip=True) if content_div else "본문 찾기 실패"
+        return content_div.get_text(strip=True) if content_div else "본문 없음"
     except Exception as e:
         return f"블로그 에러: {str(e)}"
