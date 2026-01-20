@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import re  # [추가] 텍스트 청소용 (정규표현식)
 import services.scraper_service as scraper
 import services.ai_service as ai
 import services.map_service as map_api
@@ -15,19 +16,27 @@ st.caption("유튜브/인스타 영상 링크를 넣으면, AI가 **간판을 �
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
 
+# [핵심 함수] 카드용 텍스트 청소기 (한국어/영어/숫자만 남김)
+def clean_text_for_card(text):
+    if not text: return ""
+    # 허용할 문자: 한글(가-힣), 영어(a-zA-Z), 숫자(0-9), 공백(\s), 그리고 기본 기호 ( ) - &
+    # [^...] 은 이 안에 없는 건 다 지운다는 뜻
+    cleaned = re.sub(r'[^가-힣a-zA-Z0-9\s\(\)\-\&]', '', text)
+    # 불필요한 공백 정리 (여러 칸 공백 -> 한 칸)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
 # 입력 폼
 with st.form("input_form"):
     url = st.text_input("링크 입력 (유튜브, 인스타, 블로그)", placeholder="https://...")
     submitted = st.form_submit_button("분석 시작 🚀", type="primary")
 
 if submitted and url:
-    # 1. 영상인지 텍스트인지 판단
     is_video = "youtube.com" in url or "youtu.be" in url or "instagram.com" in url
     
-    # 상태 메시지 표시
     with st.status("🕵️ AI가 분석을 시작합니다...", expanded=True) as status:
         
-        # [A] 영상 처리 모드
+        # [A] 영상 처리
         if is_video:
             st.write("📥 영상 다운로드 중... (서버 성능 풀가동!)")
             video_path, error = scraper.get_video_file(url)
@@ -40,33 +49,27 @@ if submitted and url:
             st.write("🧠 Gemini 2.5 Pro가 영상을 시청 중입니다... (시각+청각 분석)")
             ai_result = ai.analyze_video(video_path)
             
-            # 용량 관리를 위해 분석 후 파일 삭제
             if os.path.exists(video_path):
                 os.remove(video_path)
 
-        # [B] 텍스트(블로그) 처리 모드
+        # [B] 텍스트 처리
         else:
             st.write("📄 텍스트 정보를 수집 중입니다...")
-            # 네이버 블로그 등 텍스트 추출
             raw_text = scraper.get_naver_blog_content(url) if "naver" in url else "텍스트 추출 불가"
             st.write("🧠 Gemini 2.5 Pro가 텍스트를 읽는 중입니다...")
             ai_result = ai.analyze_text(raw_text)
 
-        # [공통] 지도 정보 검색 및 데이터 통합
+        # [공통] 지도 검색
         places_data = []
         if ai_result.get("places"):
             st.write("🗺️ 구글 지도에서 정확한 위치 찾는 중...")
             
             for place in ai_result["places"]:
-                # AI가 찾은 검색어 (예: 런던베이글뮤지엄 도산)
                 query = place.get("search_query", "맛집")
-                
-                # 구글 맵 검색
                 map_info = map_api.search_place(query)
                 review_summary = ""
                 
                 if map_info:
-                    # 리뷰 가져와서 요약 (AI에게 "군더더기 없이 요약해"라고 시킨 함수 호출)
                     reviews = map_api.get_place_reviews(map_info['place_id'])
                     review_summary = ai.summarize_reviews(reviews)
                 
@@ -76,7 +79,6 @@ if submitted and url:
                     "review_summary": review_summary
                 })
         
-        # 결과 저장
         st.session_state.analysis_result = {
             "summary": ai_result.get("summary"),
             "places_data": places_data,
@@ -84,7 +86,7 @@ if submitted and url:
         }
         status.update(label="✅ 분석 완료!", state="complete")
 
-# --- 결과 출력 화면 ---
+# --- 결과 출력 ---
 if st.session_state.analysis_result:
     res = st.session_state.analysis_result
     
@@ -92,8 +94,6 @@ if st.session_state.analysis_result:
     st.subheader("📝 3줄 요약")
     if res.get("summary"):
         st.info(res["summary"])
-    else:
-        st.warning("요약 내용을 가져오지 못했습니다.")
     
     st.subheader("📍 발견된 맛집 리스트")
     
@@ -105,49 +105,49 @@ if st.session_state.analysis_result:
         p_map = item['map_info']
         review_summ = item.get('review_summary', '')
         
-        # [핵심 로직] 카드에 넣을 이름 결정
-        # 1순위: 구글맵 공식 상호명 (가장 정확함, 태국어 등 원본 유지)
+        # 1. 원본 이름 결정 (우선순위: 구글맵 > AI)
         if p_map and p_map.get('name'):
-            safe_name_for_card = p_map['name']
-        # 2순위: 구글맵 정보가 없을 때만 AI가 만든 안전한 이름 사용
+            original_name = p_map['name']
         elif p_ai.get('display_name'):
-            safe_name_for_card = p_ai['display_name']
-        # 3순위: 그마저도 없으면 검색어 사용
+            original_name = p_ai['display_name']
         else:
-            safe_name_for_card = p_ai.get('search_query', '알 수 없는 식당')
+            original_name = p_ai.get('search_query', '알 수 없는 식당')
 
-        # 화면 UI 표시 이름도 카드 이름과 동일하게
-        ui_name = safe_name_for_card
+        # 2. [수정] 카드용 이름은 '청소'해서 전달
+        # (태국어 등이 섞여 있으면 다 지우고 영어/한글만 남김)
+        card_name_clean = clean_text_for_card(original_name)
         
+        # 만약 다 지웠더니 남는 게 없다면(예: 100% 태국어였음), AI가 준 이름 사용
+        if not card_name_clean.strip():
+            card_name_clean = clean_text_for_card(p_ai.get('display_name', 'Global Restaurant'))
+
         desc = p_ai.get('description', '')
         
-        # 카드 데이터 구성
+        # 카드 데이터
         card_data = {
-            "식당이름": safe_name_for_card, 
+            "식당이름": card_name_clean,  # <--- 깨끗해진 이름 들어감
             "평점": p_map['rating'] if p_map else 0.0,
             "특징": desc,
             "리뷰요약": review_summ,
             "지도링크": map_api.get_map_link(p_map['place_id']) if p_map else "",
-            # 사진 URL은 map_api에서 가져오거나 비워둠
             "사진URL": p_map.get('photo_url') if p_map else None
         }
 
         with st.container():
-            c1, c2 = st.columns([3, 2]) # 카드 이미지가 좀 더 잘 보이게 비율 조정
+            c1, c2 = st.columns([3, 2])
             
             with c1:
-                st.markdown(f"### {ui_name}")  
+                # 화면에는 원본 이름(태국어 포함) 보여줌 (브라우저는 폰트가 있으니까)
+                st.markdown(f"### {original_name}")  
                 st.write(f"💡 {desc}")
                 if review_summ:
                     st.success(f"🗣️ **후기 요약:** {review_summ}")
                 
-                # 구글맵 링크 버튼
                 if p_map:
                     map_link = map_api.get_map_link(p_map['place_id'])
                     st.link_button("🗺️ 구글 지도 보기", map_link)
                     
             with c2:
-                # 카드 이미지 생성 (image_service.py 호출)
                 try:
                     img_path = image_gen.create_restaurant_card(card_data)
                     st.image(img_path, caption="📸 저장해서 공유하세요!", use_container_width=True)
