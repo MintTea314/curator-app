@@ -71,7 +71,7 @@ if submitted and url:
                     review_summary = ai.summarize_reviews(reviews)
                 
                 places_data.append({
-                    "ai_info": place,           # 여기에 display_name이 들어있음
+                    "ai_info": place,
                     "map_info": map_info,
                     "review_summary": review_summary
                 })
@@ -106,22 +106,24 @@ if st.session_state.analysis_result:
         review_summ = item.get('review_summary', '')
         
         # [핵심 로직] 카드에 넣을 이름 결정
-        # 1순위: AI가 만들어준 'display_name' (한글/영어라 폰트 안 깨짐)
-        # 2순위: 구글맵 'name' (태국어 등이 섞여있을 수 있음)
-        # 3순위: AI가 찾은 'search_query'
-        
-        safe_name_for_card = p_ai.get('display_name')
-        if not safe_name_for_card:
-            safe_name_for_card = p_map['name'] if p_map else p_ai.get('search_query', '알 수 없는 식당')
+        # 1순위: 구글맵 공식 상호명 (가장 정확함, 태국어 등 원본 유지)
+        if p_map and p_map.get('name'):
+            safe_name_for_card = p_map['name']
+        # 2순위: 구글맵 정보가 없을 때만 AI가 만든 안전한 이름 사용
+        elif p_ai.get('display_name'):
+            safe_name_for_card = p_ai['display_name']
+        # 3순위: 그마저도 없으면 검색어 사용
+        else:
+            safe_name_for_card = p_ai.get('search_query', '알 수 없는 식당')
 
-        # 화면에 보여줄 이름 (웹 브라우저는 태국어도 잘 나오니 구글맵 이름 우선)
-        ui_name = p_map['name'] if p_map else safe_name_for_card
+        # 화면 UI 표시 이름도 카드 이름과 동일하게
+        ui_name = safe_name_for_card
         
         desc = p_ai.get('description', '')
         
         # 카드 데이터 구성
         card_data = {
-            "식당이름": safe_name_for_card,  # 폰트 깨짐 방지용 이름
+            "식당이름": safe_name_for_card, 
             "평점": p_map['rating'] if p_map else 0.0,
             "특징": desc,
             "리뷰요약": review_summ,
@@ -134,7 +136,7 @@ if st.session_state.analysis_result:
             c1, c2 = st.columns([3, 2]) # 카드 이미지가 좀 더 잘 보이게 비율 조정
             
             with c1:
-                st.markdown(f"### {ui_name}")  # 화면엔 원래 이름 출력
+                st.markdown(f"### {ui_name}")  
                 st.write(f"💡 {desc}")
                 if review_summ:
                     st.success(f"🗣️ **후기 요약:** {review_summ}")
