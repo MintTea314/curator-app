@@ -33,7 +33,7 @@ if submitted and url:
                 st.error(error)
                 st.stop()
             
-            st.write("🧠 Gemini 2.0이 영상을 시청 중입니다... (시각+청각 분석)")
+            st.write("🧠 Gemini 2.5 Pro가 영상을 시청 중입니다... (시각+청각 분석)")
             ai_result = ai.analyze_video(video_path)
             
             # 용량 관리를 위해 파일 삭제
@@ -117,3 +117,4 @@ if st.session_state.analysis_result:
                 st.image(img, caption="저장용 카드")
         
         st.markdown("---")
+
