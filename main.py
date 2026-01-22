@@ -1,8 +1,8 @@
 import streamlit as st
 import os
 import re
-import pandas as pd  # [추가] 엑셀 데이터 처리용
-import io            # [추가] 엑셀 파일 메모리 저장용
+import pandas as pd  # 엑셀/데이터프레임용
+import io            # 엑셀 파일 처리용
 import services.scraper_service as scraper
 import services.ai_service as ai
 import services.map_service as map_api
@@ -91,49 +91,12 @@ if st.session_state.analysis_result:
     
     st.divider()
     
-    # [부활] 엑셀 다운로드 버튼 영역
-    if res["places_data"]:
-        excel_data = []
-        for item in res["places_data"]:
-            p_ai = item['ai_info']
-            p_map = item['map_info']
-            
-            # 엑셀에 저장할 데이터 정리
-            name = p_map['name'] if p_map else p_ai.get('search_query')
-            addr = p_map['address'] if p_map else "주소 정보 없음"
-            rating = p_map['rating'] if p_map else 0.0
-            link = map_api.get_map_link(p_map['place_id']) if p_map else ""
-            
-            excel_data.append({
-                "식당이름": name,
-                "평점": rating,
-                "특징": p_ai.get('description', ''),
-                "리뷰요약": item.get('review_summary', ''),
-                "주소": addr,
-                "구글맵링크": link
-            })
-            
-        # 데이터프레임 생성
-        df = pd.DataFrame(excel_data)
-        
-        # 엑셀 파일로 변환 (메모리 상에서)
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='맛집리스트')
-            
-        # 다운로드 버튼 표시
-        st.download_button(
-            label="📥 엑셀 파일로 다운로드",
-            data=buffer.getvalue(),
-            file_name="AI_맛집리스트.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
+    # 1. 3줄 요약
     st.subheader("📝 3줄 요약")
     if res.get("summary"):
         st.info(res["summary"])
     
+    # 2. 맛집 카드 리스트
     st.subheader("📍 발견된 맛집 리스트")
     
     if not res["places_data"]:
@@ -144,7 +107,6 @@ if st.session_state.analysis_result:
         p_map = item['map_info']
         review_summ = item.get('review_summary', '')
         
-        # 이름 우선순위 (구글맵 > AI)
         if p_map and p_map.get('name'):
             original_name = p_map['name']
         elif p_ai.get('display_name'):
@@ -152,7 +114,6 @@ if st.session_state.analysis_result:
         else:
             original_name = p_ai.get('search_query', '알 수 없는 식당')
 
-        # 카드용 이름 청소
         card_name_clean = clean_text_for_card(original_name)
         if not card_name_clean.strip():
             card_name_clean = clean_text_for_card(p_ai.get('display_name', 'Global Restaurant'))
@@ -189,3 +150,45 @@ if st.session_state.analysis_result:
                     st.error(f"카드 생성 실패: {e}")
         
         st.markdown("---")
+
+    # 3. [최하단] 데이터 표 & 엑셀 다운로드 (이 위치로 이동했습니다!)
+    if res["places_data"]:
+        st.subheader("📊 데이터 모아보기")
+        
+        # 데이터프레임 만들기
+        excel_data = []
+        for item in res["places_data"]:
+            p_ai = item['ai_info']
+            p_map = item['map_info']
+            
+            name = p_map['name'] if p_map else p_ai.get('search_query')
+            addr = p_map['address'] if p_map else "주소 정보 없음"
+            rating = p_map['rating'] if p_map else 0.0
+            link = map_api.get_map_link(p_map['place_id']) if p_map else ""
+            
+            excel_data.append({
+                "식당이름": name,
+                "평점": rating,
+                "특징": p_ai.get('description', ''),
+                "리뷰요약": item.get('review_summary', ''),
+                "주소": addr,
+                "구글맵링크": link
+            })
+            
+        df = pd.DataFrame(excel_data)
+        
+        # [화면 표시] 인라인 표 (복사하기 좋음)
+        st.dataframe(df, use_container_width=True)
+        
+        # [다운로드] 엑셀 파일 생성
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='맛집리스트')
+            
+        st.download_button(
+            label="📥 엑셀 파일로 다운로드",
+            data=buffer.getvalue(),
+            file_name="AI_맛집리스트.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
