@@ -1,6 +1,8 @@
 import streamlit as st
 import os
-import re  # [추가] 텍스트 청소용 (정규표현식)
+import re
+import pandas as pd  # [추가] 엑셀 데이터 처리용
+import io            # [추가] 엑셀 파일 메모리 저장용
 import services.scraper_service as scraper
 import services.ai_service as ai
 import services.map_service as map_api
@@ -16,13 +18,10 @@ st.caption("유튜브/인스타 영상 링크를 넣으면, AI가 **간판을 �
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
 
-# [핵심 함수] 카드용 텍스트 청소기 (한국어/영어/숫자만 남김)
+# 텍스트 청소 함수 (카드용)
 def clean_text_for_card(text):
     if not text: return ""
-    # 허용할 문자: 한글(가-힣), 영어(a-zA-Z), 숫자(0-9), 공백(\s), 그리고 기본 기호 ( ) - &
-    # [^...] 은 이 안에 없는 건 다 지운다는 뜻
     cleaned = re.sub(r'[^가-힣a-zA-Z0-9\s\(\)\-\&]', '', text)
-    # 불필요한 공백 정리 (여러 칸 공백 -> 한 칸)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
@@ -91,6 +90,46 @@ if st.session_state.analysis_result:
     res = st.session_state.analysis_result
     
     st.divider()
+    
+    # [부활] 엑셀 다운로드 버튼 영역
+    if res["places_data"]:
+        excel_data = []
+        for item in res["places_data"]:
+            p_ai = item['ai_info']
+            p_map = item['map_info']
+            
+            # 엑셀에 저장할 데이터 정리
+            name = p_map['name'] if p_map else p_ai.get('search_query')
+            addr = p_map['address'] if p_map else "주소 정보 없음"
+            rating = p_map['rating'] if p_map else 0.0
+            link = map_api.get_map_link(p_map['place_id']) if p_map else ""
+            
+            excel_data.append({
+                "식당이름": name,
+                "평점": rating,
+                "특징": p_ai.get('description', ''),
+                "리뷰요약": item.get('review_summary', ''),
+                "주소": addr,
+                "구글맵링크": link
+            })
+            
+        # 데이터프레임 생성
+        df = pd.DataFrame(excel_data)
+        
+        # 엑셀 파일로 변환 (메모리 상에서)
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='맛집리스트')
+            
+        # 다운로드 버튼 표시
+        st.download_button(
+            label="📥 엑셀 파일로 다운로드",
+            data=buffer.getvalue(),
+            file_name="AI_맛집리스트.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
     st.subheader("📝 3줄 요약")
     if res.get("summary"):
         st.info(res["summary"])
@@ -105,7 +144,7 @@ if st.session_state.analysis_result:
         p_map = item['map_info']
         review_summ = item.get('review_summary', '')
         
-        # 1. 원본 이름 결정 (우선순위: 구글맵 > AI)
+        # 이름 우선순위 (구글맵 > AI)
         if p_map and p_map.get('name'):
             original_name = p_map['name']
         elif p_ai.get('display_name'):
@@ -113,19 +152,15 @@ if st.session_state.analysis_result:
         else:
             original_name = p_ai.get('search_query', '알 수 없는 식당')
 
-        # 2. [수정] 카드용 이름은 '청소'해서 전달
-        # (태국어 등이 섞여 있으면 다 지우고 영어/한글만 남김)
+        # 카드용 이름 청소
         card_name_clean = clean_text_for_card(original_name)
-        
-        # 만약 다 지웠더니 남는 게 없다면(예: 100% 태국어였음), AI가 준 이름 사용
         if not card_name_clean.strip():
             card_name_clean = clean_text_for_card(p_ai.get('display_name', 'Global Restaurant'))
 
         desc = p_ai.get('description', '')
         
-        # 카드 데이터
         card_data = {
-            "식당이름": card_name_clean,  # <--- 깨끗해진 이름 들어감
+            "식당이름": card_name_clean,
             "평점": p_map['rating'] if p_map else 0.0,
             "특징": desc,
             "리뷰요약": review_summ,
@@ -137,7 +172,6 @@ if st.session_state.analysis_result:
             c1, c2 = st.columns([3, 2])
             
             with c1:
-                # 화면에는 원본 이름(태국어 포함) 보여줌 (브라우저는 폰트가 있으니까)
                 st.markdown(f"### {original_name}")  
                 st.write(f"💡 {desc}")
                 if review_summ:
